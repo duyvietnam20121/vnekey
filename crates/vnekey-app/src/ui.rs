@@ -4,7 +4,7 @@
 //! bộ gõ. Bấm "Lưu" ghi `config.toml`; tiến trình khay tự nạp lại trong vòng một giây.
 
 use eframe::egui::{self, Color32, FontData, FontDefinitions, FontFamily, RichText};
-use vnekey_config::{format_abbreviations, parse_abbreviations, parse_exe_list, Config};
+use vnekey_config::{Config, format_abbreviations, parse_abbreviations, parse_exe_list};
 use vnekey_core::{Charset, InputMethod};
 use vnekey_win::process::SETTINGS_TITLE;
 
@@ -79,7 +79,7 @@ impl App {
 
                 ui.label("Cơ chế");
                 ui.horizontal(|ui| {
-                    ui.radio(true, "Keyboard hook");
+                    let _ = ui.radio(true, "Keyboard hook");
                     ui.add_enabled(false, egui::RadioButton::new(false, "IME (sắp có)"));
                 });
                 ui.end_row();

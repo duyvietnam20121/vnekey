@@ -12,7 +12,7 @@ use std::time::SystemTime;
 use serde::{Deserialize, Serialize};
 use vnekey_core::{Charset, EngineConfig, InputMethod};
 
-pub use hotkey::{is_modifier_vk, HotkeyDetector, HotkeyEvent, Mods};
+pub use hotkey::{HotkeyDetector, HotkeyEvent, Mods, is_modifier_vk};
 
 /// Phím chuyển chế độ Việt/Anh.
 /// `key = None`: chỉ dùng tổ hợp phím bổ trợ (ví dụ Ctrl+Shift, nhả phím để chuyển).

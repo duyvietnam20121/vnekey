@@ -4,12 +4,12 @@ use std::cell::RefCell;
 use std::time::{Duration, Instant};
 
 use windows::Win32::UI::Input::KeyboardAndMouse::{
-    SendInput, INPUT, INPUT_0, INPUT_KEYBOARD, KEYBDINPUT, KEYBD_EVENT_FLAGS,
-    KEYEVENTF_EXTENDEDKEY, KEYEVENTF_KEYUP, KEYEVENTF_UNICODE, VIRTUAL_KEY, VK_BACK, VK_CONTROL,
-    VK_LEFT, VK_SHIFT,
+    INPUT, INPUT_0, INPUT_KEYBOARD, KEYBD_EVENT_FLAGS, KEYBDINPUT, KEYEVENTF_EXTENDEDKEY,
+    KEYEVENTF_KEYUP, KEYEVENTF_UNICODE, SendInput, VIRTUAL_KEY, VK_BACK, VK_CONTROL, VK_LEFT,
+    VK_SHIFT,
 };
 
-use crate::plan::{plan, SendOptions, Step};
+use crate::plan::{SendOptions, Step, plan};
 
 /// Dấu hiệu gắn vào phím do chính vnekey gửi, để hook bỏ qua (tránh lặp vô hạn).
 pub(crate) const MAGIC: usize = 0x564E_454B; // "VNEK"

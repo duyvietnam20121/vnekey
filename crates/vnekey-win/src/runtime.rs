@@ -14,15 +14,15 @@ use vnekey_config::{Config, HotkeyDetector, HotkeyEvent, Mods};
 use vnekey_core::{Engine, InputMethod, Reaction};
 use windows::Win32::Foundation::{HINSTANCE, HMODULE, HWND, LPARAM, LRESULT, WPARAM};
 use windows::Win32::System::LibraryLoader::GetModuleHandleW;
-use windows::Win32::UI::Accessibility::{SetWinEventHook, UnhookWinEvent, HWINEVENTHOOK};
+use windows::Win32::UI::Accessibility::{HWINEVENTHOOK, SetWinEventHook, UnhookWinEvent};
 use windows::Win32::UI::Input::KeyboardAndMouse::{
     GetAsyncKeyState, GetKeyState, VIRTUAL_KEY, VK_CAPITAL, VK_LCONTROL, VK_LMENU, VK_LSHIFT,
     VK_LWIN, VK_RCONTROL, VK_RMENU, VK_RSHIFT, VK_RWIN,
 };
 use windows::Win32::UI::WindowsAndMessaging::{
-    CallNextHookEx, DispatchMessageW, GetForegroundWindow, GetMessageW, KillTimer, PostQuitMessage,
-    SetTimer, SetWindowsHookExW, TranslateMessage, UnhookWindowsHookEx, EVENT_SYSTEM_FOREGROUND,
-    HC_ACTION, KBDLLHOOKSTRUCT, LLKHF_INJECTED, MSG, WH_KEYBOARD_LL, WH_MOUSE_LL,
+    CallNextHookEx, DispatchMessageW, EVENT_SYSTEM_FOREGROUND, GetForegroundWindow, GetMessageW,
+    HC_ACTION, KBDLLHOOKSTRUCT, KillTimer, LLKHF_INJECTED, MSG, PostQuitMessage, SetTimer,
+    SetWindowsHookExW, TranslateMessage, UnhookWindowsHookEx, WH_KEYBOARD_LL, WH_MOUSE_LL,
     WINEVENT_OUTOFCONTEXT, WINEVENT_SKIPOWNPROCESS, WM_KEYDOWN, WM_KEYUP, WM_LBUTTONDOWN,
     WM_MBUTTONDOWN, WM_RBUTTONDOWN, WM_SYSKEYDOWN, WM_SYSKEYUP,
 };
@@ -54,19 +54,11 @@ struct Tray {
 }
 
 fn tooltip(vietnamese: bool) -> &'static str {
-    if vietnamese {
-        "vnekey: Tiếng Việt (V)"
-    } else {
-        "vnekey: English (E)"
-    }
+    if vietnamese { "vnekey: Tiếng Việt (V)" } else { "vnekey: English (E)" }
 }
 
 fn toggle_text(vietnamese: bool) -> &'static str {
-    if vietnamese {
-        "Chuyển sang tiếng Anh (E)"
-    } else {
-        "Chuyển sang tiếng Việt (V)"
-    }
+    if vietnamese { "Chuyển sang tiếng Anh (E)" } else { "Chuyển sang tiếng Việt (V)" }
 }
 
 impl Tray {

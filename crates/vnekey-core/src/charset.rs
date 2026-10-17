@@ -2,7 +2,7 @@
 //! người dùng chọn ngay trước khi gửi ra ứng dụng.
 
 use crate::charset_tables::{TCVN3, VNI_WINDOWS};
-use crate::syllable::{decompose, vowel_char, Mark, Tone};
+use crate::syllable::{Mark, Tone, decompose, vowel_char};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
@@ -84,11 +84,7 @@ fn push_table(table: &[(char, &str)], ch: char, out: &mut String) {
 }
 
 fn base_letter(base: char, upper: bool) -> char {
-    if upper {
-        base.to_ascii_uppercase()
-    } else {
-        base
-    }
+    if upper { base.to_ascii_uppercase() } else { base }
 }
 
 /// Unicode tổ hợp (kiểu Windows-1258/UniKey): chữ có dấu phụ (â ê ô ă ơ ư) giữ dạng

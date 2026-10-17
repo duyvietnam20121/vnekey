@@ -26,11 +26,7 @@ pub fn is_modifier_vk(vk: u32) -> bool {
 }
 
 fn key_to_vk(key: char) -> u32 {
-    if key == ' ' {
-        0x20
-    } else {
-        key.to_ascii_uppercase() as u32
-    }
+    if key == ' ' { 0x20 } else { key.to_ascii_uppercase() as u32 }
 }
 
 fn mods_match(hk: &Hotkey, m: Mods) -> bool {

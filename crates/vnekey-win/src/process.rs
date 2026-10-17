@@ -6,16 +6,16 @@ use std::os::windows::fs::OpenOptionsExt;
 use std::os::windows::process::CommandExt;
 use std::process::{Child, Command};
 
-use vnekey_config::{normalize_exe, Config};
-use windows::core::{w, HSTRING, PCWSTR, PWSTR};
+use vnekey_config::{Config, normalize_exe};
 use windows::Win32::Foundation::{CloseHandle, HWND};
 use windows::Win32::System::Threading::{
-    OpenProcess, QueryFullProcessImageNameW, PROCESS_NAME_WIN32, PROCESS_QUERY_LIMITED_INFORMATION,
+    OpenProcess, PROCESS_NAME_WIN32, PROCESS_QUERY_LIMITED_INFORMATION, QueryFullProcessImageNameW,
 };
 use windows::Win32::UI::WindowsAndMessaging::{
-    FindWindowW, GetWindowThreadProcessId, MessageBoxW, SetForegroundWindow, ShowWindow,
-    MB_ICONERROR, MB_OK, SW_RESTORE,
+    FindWindowW, GetWindowThreadProcessId, MB_ICONERROR, MB_OK, MessageBoxW, SW_RESTORE,
+    SetForegroundWindow, ShowWindow,
 };
+use windows::core::{HSTRING, PCWSTR, PWSTR, w};
 
 const CREATE_NO_WINDOW: u32 = 0x0800_0000;
 /// ERROR_SHARING_VIOLATION

@@ -233,11 +233,7 @@ impl Syllable {
                 } else {
                     c.base
                 };
-                if c.upper {
-                    to_upper(ch)
-                } else {
-                    ch
-                }
+                if c.upper { to_upper(ch) } else { ch }
             })
             .collect()
     }

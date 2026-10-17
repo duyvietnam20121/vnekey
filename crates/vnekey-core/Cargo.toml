@@ -1,0 +1,13 @@
+[package]
+name = "vnekey-core"
+description = "Bộ máy gõ tiếng Việt (Telex/VNI) thuần logic, không phụ thuộc hệ điều hành"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+
+[features]
+serde = ["dep:serde"]
+
+[dependencies]
+serde = { version = "1", features = ["derive"], optional = true }

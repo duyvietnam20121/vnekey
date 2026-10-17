@@ -1,0 +1,14 @@
+[package]
+name = "vnekey"
+description = "vnekey: bộ gõ tiếng Việt cho Windows, kết hợp ưu điểm của UniKey và EVKey"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+build = "build.rs"
+
+[dependencies]
+vnekey-core = { path = "../vnekey-core" }
+vnekey-config = { path = "../vnekey-config" }
+vnekey-win = { path = "../vnekey-win" }
+eframe = { version = "0.29", default-features = false, features = ["default_fonts", "glow"] }

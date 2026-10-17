@@ -1,0 +1,23 @@
+[package]
+name = "vnekey-win"
+description = "Tầng Windows của vnekey: hook bàn phím, khay hệ thống, gửi phím, khởi động cùng Windows"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+
+[dependencies]
+vnekey-core = { path = "../vnekey-core" }
+vnekey-config = { path = "../vnekey-config" }
+
+[target.'cfg(windows)'.dependencies]
+clipboard-win = "5"
+tray-icon = { version = "0.19", default-features = false }
+windows = { version = "0.58", features = [
+    "Win32_Foundation",
+    "Win32_System_LibraryLoader",
+    "Win32_System_Threading",
+    "Win32_UI_Accessibility",
+    "Win32_UI_Input_KeyboardAndMouse",
+    "Win32_UI_WindowsAndMessaging",
+] }

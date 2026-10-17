@@ -1,0 +1,67 @@
+name: CI
+
+on:
+  push:
+    branches: [main, master]
+  pull_request:
+  workflow_dispatch:
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  CARGO_TERM_COLOR: always
+  CARGO_INCREMENTAL: 0
+
+jobs:
+  # Lõi bộ gõ, cấu hình và phần logic thuần của tầng Windows: chạy nhanh trên Linux.
+  portable:
+    name: Test (Linux)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - name: Test
+        run: cargo test -p vnekey-core -p vnekey-config -p vnekey-win
+
+  # Build đầy đủ bằng MSVC, chạy toàn bộ test và đăng file .exe làm artifact.
+  windows:
+    name: Build and test (Windows)
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - name: Test
+        run: cargo test --workspace
+      - name: Build release
+        run: cargo build --release -p vnekey
+      - name: Checksum
+        shell: pwsh
+        run: |
+          $hash = (Get-FileHash target/release/vnekey.exe -Algorithm SHA256).Hash.ToLower()
+          "$hash  vnekey.exe" | Out-File -Encoding ascii target/release/vnekey.exe.sha256
+      - uses: actions/upload-artifact@v4
+        with:
+          name: vnekey-windows-x64
+          path: |
+            target/release/vnekey.exe
+            target/release/vnekey.exe.sha256
+          if-no-files-found: error
+
+  # Lint riêng để lỗi định dạng hay cảnh báo không chặn việc tạo file .exe.
+  lint:
+    name: Clippy and rustfmt (Windows)
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy, rustfmt
+      - uses: Swatinem/rust-cache@v2
+      - name: rustfmt
+        run: cargo fmt --all -- --check
+      - name: Clippy
+        run: cargo clippy --workspace --all-targets -- -D warnings

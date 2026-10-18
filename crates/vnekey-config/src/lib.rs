@@ -254,11 +254,13 @@ mod tests {
 
     #[test]
     fn default_config_round_trips_through_toml() {
-        let mut cfg = Config::default();
-        cfg.charset = Charset::Tcvn3;
-        cfg.excluded_apps = vec!["game.exe".into()];
+        let mut cfg = Config {
+            charset: Charset::Tcvn3,
+            excluded_apps: vec!["game.exe".into()],
+            hotkey: Hotkey { key: Some('Z'), ..Hotkey::default() },
+            ..Config::default()
+        };
         cfg.abbreviations.insert("ko".into(), "không".into());
-        cfg.hotkey.key = Some('Z');
         let text = toml::to_string_pretty(&cfg).unwrap();
         let back: Config = toml::from_str(&text).unwrap();
         assert_eq!(cfg, back);

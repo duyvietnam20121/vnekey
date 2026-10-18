@@ -715,4 +715,204 @@ mod tests {
         u.process('a');
         assert_eq!(u.backspace(), Reaction::Pass);
     }
+
+    // ---- Kiểm tra theo từ điển: sinh phím từ chữ đúng rồi so lại ----
+
+    use crate::syllable::{Mark, Tone, decompose};
+
+    /// Các từ không phụ thuộc kiểu đặt dấu (hoà/hòa), nên dùng chung cho cả hai kiểu.
+    const WORDS: &[&str] = &[
+        "việt", "nam", "người", "được", "thuở", "quyền", "giữ", "ngoài", "hoạt", "tuyết",
+        "nghiêng", "chuyện", "truyền", "nguyễn", "uống", "mượn", "hiểu", "yêu", "bầu", "cười",
+        "trường", "thương", "nước", "bước", "đường", "muốn", "chuông", "buồn", "tuổi", "cũng",
+        "những", "khách", "bạn", "chào", "các", "xin", "cảm", "ơn", "tôi", "là", "một", "anh",
+        "em", "ngày", "tháng", "năm", "học", "sinh", "giáo", "viên", "trời", "mưa", "gió", "bão",
+        "lửa", "sông", "núi", "biển", "rừng", "hoa", "quả", "cây", "nhà", "cửa", "sổ", "bàn",
+        "ghế", "sách", "vở", "bút", "thước", "kẻ", "quê", "quyết", "quán", "giá", "giờ", "giúp",
+        "giường", "gìn", "gì", "ăn", "lắm", "mặt", "cặp", "đầu", "tấm", "hấp", "bậc", "lấy",
+        "máy", "tay", "đây", "yến", "ý", "xuyên", "khuyên", "nghề", "nghĩa", "mía", "múa", "mùa",
+        "của", "chị", "mẹ", "không", "tiếng", "đời", "thời", "hoàng", "toàn", "loài", "hoặc",
+        "đoàn", "khoảng", "toán", "quốc", "đẹp", "ông", "ừ", "ư", "đ", "đã", "đi", "để", "đến",
+        "đúng", "sáng", "chiều", "tối", "đêm", "yêu", "kiến", "thức", "lập", "trình", "máy",
+        "tính", "phần", "mềm", "gõ", "chữ", "dấu", "thanh", "sắc", "huyền", "hỏi", "ngã", "nặng",
+        "ngủ", "nghỉ", "nghe", "nhìn", "nói", "viết", "đọc", "hiểu", "biết", "thấy", "muộn",
+        "luôn", "cuộc", "cuối", "tuần", "tuyệt", "vời", "ruộng", "lượng", "quạt", "quặn", "giặt",
+        "giếng", "giọng", "ngượng", "nhiều", "nhiệt", "khiêm", "thiết", "kiểm", "điều", "diễn",
+        "liên", "miền", "tiền", "hiện", "nghiệp", "chiến", "thuật", "tuyển", "chọn", "trọng",
+        // Các trường hợp từng bị coi là sai chính tả.
+        "lưu", "hưu", "cứu", "mưu", "ngưu", "tựu", "tửu", "trừu", "sưu", "ưu", "ngía", "ngịu",
+        "quới", "quờn", "khuều",
+    ];
+
+    #[derive(Clone, Copy)]
+    enum ToneAt {
+        /// Dấu thanh gõ ở cuối âm tiết (vieetj).
+        End,
+        /// Dấu thanh gõ ngay sau cụm nguyên âm, trước phụ âm cuối (vieejt).
+        AfterNucleus,
+    }
+
+    fn is_vowel_char(c: char) -> bool {
+        decompose(c).is_some_and(|d| d.base != 'd')
+    }
+
+    /// Dựng chuỗi phím từ một từ tiếng Việt đúng chính tả.
+    fn keys_for(word: &str, method: InputMethod, at: ToneAt) -> String {
+        let chars: Vec<char> = word.chars().collect();
+        let mut parts: Vec<String> = Vec::new();
+        let mut tone: Option<(usize, char)> = None;
+        for (i, &c) in chars.iter().enumerate() {
+            let Some(d) = decompose(c) else {
+                parts.push(c.to_string());
+                continue;
+            };
+            let mut s = String::new();
+            s.push(if d.upper { d.base.to_ascii_uppercase() } else { d.base });
+            match (method, d.mark) {
+                (_, Mark::None) => {}
+                (InputMethod::Telex, Mark::Circumflex) => s.push(d.base),
+                (InputMethod::Telex, Mark::Breve | Mark::Horn) => s.push('w'),
+                (InputMethod::Telex, Mark::Stroke) => s.push('d'),
+                (InputMethod::Vni, Mark::Circumflex) => s.push('6'),
+                (InputMethod::Vni, Mark::Horn) => s.push('7'),
+                (InputMethod::Vni, Mark::Breve) => s.push('8'),
+                (InputMethod::Vni, Mark::Stroke) => s.push('9'),
+            }
+            let key = match (method, d.tone) {
+                (_, Tone::None) => None,
+                (InputMethod::Telex, Tone::Acute) => Some('s'),
+                (InputMethod::Telex, Tone::Grave) => Some('f'),
+                (InputMethod::Telex, Tone::Hook) => Some('r'),
+                (InputMethod::Telex, Tone::Tilde) => Some('x'),
+                (InputMethod::Telex, Tone::Dot) => Some('j'),
+                (InputMethod::Vni, Tone::Acute) => Some('1'),
+                (InputMethod::Vni, Tone::Grave) => Some('2'),
+                (InputMethod::Vni, Tone::Hook) => Some('3'),
+                (InputMethod::Vni, Tone::Tilde) => Some('4'),
+                (InputMethod::Vni, Tone::Dot) => Some('5'),
+            };
+            if let Some(k) = key {
+                tone = Some((i, k));
+            }
+            parts.push(s);
+        }
+        if let Some((i, key)) = tone {
+            match at {
+                ToneAt::End => parts.push(key.to_string()),
+                ToneAt::AfterNucleus => {
+                    let mut j = i;
+                    while j + 1 < chars.len() && is_vowel_char(chars[j + 1]) {
+                        j += 1;
+                    }
+                    parts[j].push(key);
+                }
+            }
+        }
+        parts.concat()
+    }
+
+    fn check_words(words: &[String], method: InputMethod, failures: &mut Vec<String>) {
+        let config = EngineConfig { method, ..EngineConfig::default() };
+        for word in words {
+            for at in [ToneAt::End, ToneAt::AfterNucleus] {
+                let keys = keys_for(word, method, at);
+                let got = run(config, &keys);
+                if got != *word {
+                    failures.push(format!("{word}: gõ `{keys}` ra `{got}`"));
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn dictionary_round_trip_in_every_style() {
+        let mut variants: Vec<String> = Vec::new();
+        for w in WORDS {
+            variants.push((*w).to_owned());
+            variants.push(w.to_uppercase());
+            let mut cs = w.chars();
+            if let Some(first) = cs.next() {
+                variants.push(first.to_uppercase().chain(cs).collect());
+            }
+        }
+        let mut failures = Vec::new();
+        check_words(&variants, InputMethod::Telex, &mut failures);
+        check_words(&variants, InputMethod::Vni, &mut failures);
+        assert!(failures.is_empty(), "{} lỗi:\n{}", failures.len(), failures.join("\n"));
+    }
+
+    #[test]
+    fn sentences_round_trip() {
+        let sentence = "tiếng việt rất đẹp và người việt nam yêu quý nó";
+        let keys: String = sentence
+            .split(' ')
+            .map(|w| keys_for(w, InputMethod::Telex, ToneAt::End))
+            .collect::<Vec<_>>()
+            .join(" ");
+        assert_eq!(telex(&keys), sentence);
+        let keys: String = sentence
+            .split(' ')
+            .map(|w| keys_for(w, InputMethod::Vni, ToneAt::AfterNucleus))
+            .collect::<Vec<_>>()
+            .join(" ");
+        assert_eq!(vni(&keys), sentence);
+    }
+
+    /// Mô phỏng người gõ có dùng Backspace: `\u{8}` là phím Backspace.
+    fn type_with_backspace(config: EngineConfig, input: &str) -> String {
+        let mut engine = Engine::new(config);
+        let mut screen = String::new();
+        let apply = |screen: &mut String, reaction: Reaction, key: Option<char>| match reaction {
+            Reaction::Pass => {
+                // Phím được để đi qua: ứng dụng tự xử lý (gõ thêm chữ hoặc xoá một ký tự).
+                match key {
+                    Some(c) => screen.push(c),
+                    None => {
+                        screen.pop();
+                    }
+                }
+            }
+            Reaction::Replace { backspaces, text } => {
+                for _ in 0..backspaces {
+                    screen.pop();
+                }
+                screen.push_str(&text);
+            }
+        };
+        for ch in input.chars() {
+            if ch == '\u{8}' {
+                let reaction = engine.backspace();
+                apply(&mut screen, reaction, None);
+            } else {
+                let reaction = engine.process(ch);
+                apply(&mut screen, reaction, Some(ch));
+            }
+        }
+        screen
+    }
+
+    #[test]
+    fn backspace_in_the_middle_of_a_word_keeps_text_correct() {
+        let cfg = EngineConfig::default();
+        // Xoá chữ cuối rồi gõ lại.
+        assert_eq!(type_with_backspace(cfg, "vieetj\u{8}t"), "việt");
+        assert_eq!(type_with_backspace(cfg, "nguwowif\u{8}i"), "người");
+        assert_eq!(type_with_backspace(cfg, "toans\u{8}n"), "toán");
+        // Xoá cả chữ có dấu rồi gõ chữ khác.
+        assert_eq!(type_with_backspace(cfg, "as\u{8}e"), "e");
+        assert_eq!(type_with_backspace(cfg, "toi\u{8}\u{8}ooi"), "tôi");
+        // Xoá hai ký tự cuối của "người" thì dấu huyền vẫn nằm trên chữ còn lại.
+        assert_eq!(type_with_backspace(cfg, "nguwowif\u{8}\u{8}i"), "ngừi");
+    }
+
+    #[test]
+    fn words_that_were_wrongly_restored() {
+        assert_eq!(telex("luwu"), "lưu");
+        assert_eq!(telex("cuwus"), "cứu");
+        assert_eq!(telex("ngias"), "ngía");
+        assert_eq!(telex("quowis"), "quới");
+        assert_eq!(telex("ngiuj"), "ngịu");
+        assert_eq!(vni("luw"), "luw");
+        assert_eq!(vni("lu7u"), "lưu");
+    }
 }

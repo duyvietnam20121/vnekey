@@ -1,15 +1,30 @@
 name: Release
 
-# Đẩy tag dạng v0.1.0 để tạo bản phát hành kèm vnekey.exe và mã SHA-256.
+# Hai cách chạy:
+# 1. Đẩy tag dạng v0.1.0.
+# 2. Vào tab Actions, chọn "Release", bấm "Run workflow" và nhập tên tag.
 on:
   push:
     tags: ["v*"]
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Tên tag của bản phát hành (ví dụ v0.1.0). Tag được tạo nếu chưa có."
+        required: true
+        default: "v0.1.0"
+        type: string
+      prerelease:
+        description: "Đánh dấu là bản thử nghiệm (pre-release)"
+        required: false
+        default: false
+        type: boolean
 
 permissions:
   contents: write
 
 env:
   CARGO_TERM_COLOR: always
+  RELEASE_TAG: ${{ github.event_name == 'workflow_dispatch' && inputs.tag || github.ref_name }}
 
 jobs:
   release:
@@ -31,6 +46,9 @@ jobs:
           "$hash  vnekey.exe" | Out-File -Encoding ascii dist/vnekey.exe.sha256
       - uses: softprops/action-gh-release@v2
         with:
+          tag_name: ${{ env.RELEASE_TAG }}
+          target_commitish: ${{ github.sha }}
+          prerelease: ${{ inputs.prerelease == true }}
           files: |
             dist/vnekey.exe
             dist/vnekey.exe.sha256

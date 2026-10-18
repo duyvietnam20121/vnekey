@@ -152,8 +152,8 @@ const FINALS: &[&str] = &["", "c", "ch", "m", "n", "ng", "nh", "p", "t"];
 const NUCLEI: &[&str] = &[
     "a", "e", "i", "o", "u", "y", //
     "ai", "ao", "au", "ay", "eo", "eu", "ia", "ie", "iu", "oa", "oe", "oi", "ua", "ue", "ui", "uo",
-    "uy", "ye", //
-    "oai", "oao", "oay", "oeo", "uay", "uoi", "uou", "uye", "ieu", "yeu", "uya", "uyu",
+    "uu", "uy", "ye", //
+    "oai", "oao", "oay", "oeo", "uay", "uoi", "uou", "uye", "ieu", "yeu", "uya", "uyu", "ueu",
 ];
 
 #[derive(Debug, Default, Clone)]
@@ -184,7 +184,8 @@ impl Syllable {
         if start > 0 && end - start >= 2 {
             let prev = self.cells[start - 1].base;
             let cur = self.cells[start].base;
-            if (prev == 'q' && cur == 'u') || (prev == 'g' && cur == 'i') {
+            let after_n = start >= 2 && self.cells[start - 2].base == 'n';
+            if (prev == 'q' && cur == 'u') || (prev == 'g' && cur == 'i' && !after_n) {
                 start += 1;
             }
         }
@@ -244,7 +245,8 @@ impl Syllable {
         let n = self.cells.len();
         for i in 0..n.saturating_sub(2) {
             let (a, b) = (self.cells[i], self.cells[i + 1]);
-            if a.base == 'u' && b.base == 'o' {
+            let after_q = i > 0 && self.cells[i - 1].base == 'q';
+            if a.base == 'u' && b.base == 'o' && !after_q {
                 let pair = (a.mark, b.mark);
                 if pair == (Mark::None, Mark::Horn) || pair == (Mark::Horn, Mark::None) {
                     self.cells[i].mark = Mark::Horn;

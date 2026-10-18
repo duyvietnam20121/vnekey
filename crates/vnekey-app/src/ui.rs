@@ -4,7 +4,9 @@
 //! bộ gõ. Bấm "Lưu" ghi `config.toml`; tiến trình khay tự nạp lại trong vòng một giây.
 
 use eframe::egui::{self, Color32, FontData, FontDefinitions, FontFamily, FontId, RichText};
-use vnekey_config::{Config, Hotkey, format_abbreviations, parse_abbreviations, parse_exe_list};
+use vnekey_config::{
+    Config, Hotkey, Theme, format_abbreviations, parse_abbreviations, parse_exe_list,
+};
 use vnekey_core::{Charset, InputMethod};
 use vnekey_win::process::SETTINGS_TITLE;
 
@@ -57,14 +59,16 @@ struct App {
     try_text: String,
     tab: Tab,
     status: Option<Status>,
+    applied_theme: Theme,
 }
 
 impl App {
     fn new(cc: &eframe::CreationContext<'_>) -> Self {
         install_fonts(&cc.egui_ctx);
-        apply_style(&cc.egui_ctx);
         let config = Config::load();
+        apply_style(&cc.egui_ctx, config.theme);
         Self {
+            applied_theme: config.theme,
             abbreviations_text: format_abbreviations(&config.abbreviations),
             excluded_text: config.excluded_apps.join("\n"),
             saved: config.clone(),
@@ -217,23 +221,7 @@ impl App {
     fn tab_hotkeys(&mut self, ui: &mut egui::Ui) {
         section(ui, "Phím chuyển Việt/Anh", |ui| {
             let hk = &mut self.draft.hotkey;
-            ui.horizontal(|ui| {
-                ui.checkbox(&mut hk.ctrl, "Ctrl");
-                ui.checkbox(&mut hk.shift, "Shift");
-                ui.checkbox(&mut hk.alt, "Alt");
-                ui.checkbox(&mut hk.win, "Win");
-                ui.label("+");
-                egui::ComboBox::from_id_salt("hotkey_key")
-                    .width(90.0)
-                    .selected_text(key_label(hk.key))
-                    .show_ui(ui, |ui| {
-                        ui.selectable_value(&mut hk.key, None, "Không");
-                        ui.selectable_value(&mut hk.key, Some(' '), "Space");
-                        for c in ('A'..='Z').chain('0'..='9') {
-                            ui.selectable_value(&mut hk.key, Some(c), c.to_string());
-                        }
-                    });
-            });
+            hotkey_editor(ui, "hotkey_key", hk, true);
             ui.add_space(4.0);
             if hk.has_modifier() {
                 ui.label(format!("Hiện tại: {}", hotkey_text(hk)));
@@ -244,13 +232,33 @@ impl App {
                 ui.colored_label(ERROR, "Cần chọn ít nhất một phím Ctrl/Shift/Alt/Win.");
             }
         });
-        hint(ui, "Các phím tắt F1-F12 như EVKey sẽ bổ sung ở bản sau.");
+
+        section(ui, "Phím phục hồi từ", |ui| {
+            ui.checkbox(&mut self.draft.restore_enabled, "Bật phím phục hồi từ");
+            ui.add_enabled_ui(self.draft.restore_enabled, |ui| {
+                hotkey_editor(ui, "restore_key", &mut self.draft.restore_hotkey, true);
+            });
+            hint(ui, "Đưa từ đang gõ về đúng các phím đã bấm, ví dụ \"việt\" về \"vieetj\".");
+        });
+
+        section(ui, "Phím tắt chức năng", |ui| {
+            ui.checkbox(&mut self.draft.function_keys_enabled, "Bật phím tắt F1-F12");
+            ui.add_enabled_ui(self.draft.function_keys_enabled, |ui| {
+                hotkey_editor(ui, "function_key", &mut self.draft.function_mods, false);
+            });
+            hint(
+                ui,
+                "Cùng các phím bổ trợ ở trên: F1 bật tiếng Việt, F2 tắt, F3 bảng mã Unicode, \
+                 F5 mở cài đặt, F9 bật/tắt gõ tắt, F12 bỏ từ đang gõ.",
+            );
+        });
     }
 
     fn tab_system(&mut self, ui: &mut egui::Ui) {
         section(ui, "Khởi động", |ui| {
             let d = &mut self.draft;
             ui.checkbox(&mut d.start_vietnamese, "Mở app ở chế độ tiếng Việt");
+            ui.checkbox(&mut d.show_settings_on_start, "Hiện cửa sổ cài đặt khi khởi động");
             ui.checkbox(&mut d.autostart, "Khởi động cùng Windows");
             ui.checkbox(&mut d.run_as_admin, "Chạy với quyền admin (hiện hộp thoại UAC khi mở)");
             hint(
@@ -259,6 +267,20 @@ impl App {
                  \"Khởi động cùng Windows\", vnekey dùng Task Scheduler; cần mở cài đặt từ bản \
                  đang chạy bằng quyền admin để tạo tác vụ.",
             );
+        });
+
+        section(ui, "Chuyển Việt/Anh", |ui| {
+            let d = &mut self.draft;
+            ui.checkbox(&mut d.beep_on_toggle, "Phát tiếng bíp khi chuyển Việt/Anh");
+            ui.checkbox(&mut d.per_app_state, "Nhớ chế độ Việt/Anh riêng cho từng ứng dụng");
+        });
+
+        section(ui, "Giao diện", |ui| {
+            ui.horizontal(|ui| {
+                ui.label("Màu cửa sổ cài đặt");
+                ui.selectable_value(&mut self.draft.theme, Theme::Dark, "Tối");
+                ui.selectable_value(&mut self.draft.theme, Theme::Light, "Sáng");
+            });
         });
 
         section(ui, "Loại trừ ứng dụng", |ui| {
@@ -274,15 +296,28 @@ impl App {
             );
         });
 
+        section(ui, "Chẩn đoán", |ui| {
+            ui.horizontal(|ui| {
+                if ui.button("Mở nhật ký").clicked() {
+                    vnekey_win::process::open_log();
+                }
+                if ui.button("Mở thư mục cấu hình").clicked() {
+                    if let Some(dir) = Config::dir() {
+                        let _ = std::process::Command::new("explorer").arg(dir).spawn();
+                    }
+                }
+            });
+            hint(
+                ui,
+                "Nếu gõ hoặc phím chuyển không hoạt động: thoát vnekey ở khay, chạy lại bằng \
+                 `vnekey.exe --debug`, thử gõ rồi mở nhật ký để xem hook có nhận được phím không.",
+            );
+        });
+
         section(ui, "Về vnekey", |ui| {
             ui.label(format!("Phiên bản {}", env!("CARGO_PKG_VERSION")));
             if let Some(path) = Config::path() {
                 hint(ui, &format!("Cấu hình: {}", path.display()));
-            }
-            if ui.button("Mở thư mục cấu hình").clicked() {
-                if let Some(dir) = Config::dir() {
-                    let _ = std::process::Command::new("explorer").arg(dir).spawn();
-                }
             }
             hint(
                 ui,
@@ -353,6 +388,10 @@ impl App {
 
 impl eframe::App for App {
     fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
+        if self.draft.theme != self.applied_theme {
+            apply_style(ctx, self.draft.theme);
+            self.applied_theme = self.draft.theme;
+        }
         let dirty = self.is_dirty();
 
         egui::TopBottomPanel::top("header").show(ctx, |ui| {
@@ -426,9 +465,35 @@ fn hotkey_text(hk: &Hotkey) -> String {
     parts.join(" + ")
 }
 
+/// Hàng chọn phím bổ trợ (và tuỳ chọn phím chính) của một tổ hợp phím.
+fn hotkey_editor(ui: &mut egui::Ui, id: &str, hk: &mut Hotkey, with_key: bool) {
+    ui.horizontal(|ui| {
+        ui.checkbox(&mut hk.ctrl, "Ctrl");
+        ui.checkbox(&mut hk.shift, "Shift");
+        ui.checkbox(&mut hk.alt, "Alt");
+        ui.checkbox(&mut hk.win, "Win");
+        if with_key {
+            ui.label("+");
+            egui::ComboBox::from_id_salt(id).width(90.0).selected_text(key_label(hk.key)).show_ui(
+                ui,
+                |ui| {
+                    ui.selectable_value(&mut hk.key, None, "Không");
+                    ui.selectable_value(&mut hk.key, Some(' '), "Space");
+                    for c in ('A'..='Z').chain('0'..='9') {
+                        ui.selectable_value(&mut hk.key, Some(c), c.to_string());
+                    }
+                },
+            );
+        }
+    });
+}
+
 /// Cỡ chữ, khoảng cách và màu nhấn.
-fn apply_style(ctx: &egui::Context) {
-    ctx.set_visuals(egui::Visuals::dark());
+fn apply_style(ctx: &egui::Context, theme: Theme) {
+    ctx.set_visuals(match theme {
+        Theme::Dark => egui::Visuals::dark(),
+        Theme::Light => egui::Visuals::light(),
+    });
     ctx.style_mut(|style| {
         use egui::TextStyle;
         style.text_styles.insert(TextStyle::Body, FontId::proportional(15.0));

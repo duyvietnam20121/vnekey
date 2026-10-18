@@ -1,17 +1,18 @@
 //! Vòng chạy chính của vnekey (tiến trình khay): hook bàn phím/chuột, theo dõi cửa sổ đang
 //! focus, biểu tượng khay hệ thống và tự nạp lại cấu hình khi cửa sổ cài đặt lưu.
 //!
-//! Mọi thứ chạy trên một luồng có vòng lặp thông điệp; trạng thái nằm trong `thread_local`
-//! nên không cần khoá. Hook phải trả về nhanh nên mọi việc nặng đều được tránh ở đây.
+//! Logic xử lý phím nằm ở [`Controller`] (kiểm thử được ở mọi nền tảng); module này chỉ nối
+//! Controller với Windows. Mọi thứ chạy trên một luồng có vòng lặp thông điệp nên trạng thái
+//! nằm trong `thread_local`, không cần khoá. Hook phải trả về nhanh.
 
 use std::cell::RefCell;
 use std::process::Child;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::SystemTime;
 
 use tray_icon::menu::{Menu, MenuEvent, MenuItem, PredefinedMenuItem};
 use tray_icon::{Icon, MouseButton, MouseButtonState, TrayIcon, TrayIconBuilder, TrayIconEvent};
-use vnekey_config::{Config, HotkeyDetector, HotkeyEvent, Mods};
-use vnekey_core::{Engine, InputMethod, Reaction};
+use vnekey_config::{Config, Mods};
 use windows::Win32::Foundation::{HINSTANCE, HMODULE, HWND, LPARAM, LRESULT, WPARAM};
 use windows::Win32::System::LibraryLoader::GetModuleHandleW;
 use windows::Win32::UI::Accessibility::{HWINEVENTHOOK, SetWinEventHook, UnhookWinEvent};
@@ -21,26 +22,29 @@ use windows::Win32::UI::Input::KeyboardAndMouse::{
 };
 use windows::Win32::UI::WindowsAndMessaging::{
     CallNextHookEx, DispatchMessageW, EVENT_SYSTEM_FOREGROUND, GetForegroundWindow, GetMessageW,
-    HC_ACTION, KBDLLHOOKSTRUCT, KillTimer, LLKHF_INJECTED, MSG, PostQuitMessage, SetTimer,
-    SetWindowsHookExW, TranslateMessage, UnhookWindowsHookEx, WH_KEYBOARD_LL, WH_MOUSE_LL,
-    WINEVENT_OUTOFCONTEXT, WINEVENT_SKIPOWNPROCESS, WM_KEYDOWN, WM_KEYUP, WM_LBUTTONDOWN,
-    WM_MBUTTONDOWN, WM_RBUTTONDOWN, WM_SYSKEYDOWN, WM_SYSKEYUP,
+    HC_ACTION, KBDLLHOOKSTRUCT, KillTimer, LLKHF_INJECTED, MB_ICONASTERISK, MB_ICONEXCLAMATION,
+    MSG, MessageBeep, PostQuitMessage, SetTimer, SetWindowsHookExW, TranslateMessage,
+    UnhookWindowsHookEx, WH_KEYBOARD_LL, WH_MOUSE_LL, WINEVENT_OUTOFCONTEXT,
+    WINEVENT_SKIPOWNPROCESS, WM_KEYDOWN, WM_KEYUP, WM_LBUTTONDOWN, WM_MBUTTONDOWN, WM_RBUTTONDOWN,
+    WM_SYSKEYDOWN, WM_SYSKEYUP,
 };
 
-use crate::icon;
-use crate::keys::{self, Key};
+use crate::controller::{Controller, Platform};
 use crate::plan::SendOptions;
-use crate::process;
-use crate::send;
+use crate::{icon, log, process, send};
 
 /// Chu kỳ của bộ đếm giờ (ms): xử lý sự kiện khay, trả lại Clipboard, kiểm tra file cấu hình.
 const TICK_MS: u32 = 100;
 /// Kiểm tra file cấu hình mỗi `CONFIG_CHECK_TICKS` chu kỳ.
 const CONFIG_CHECK_TICKS: u32 = 5;
 
+/// Đã ghi nhật ký lần đầu hook nhận được phím chưa (để biết hook có hoạt động không).
+static FIRST_KEY_LOGGED: AtomicBool = AtomicBool::new(false);
+
 enum UiAction {
     Toggle,
     OpenSettings,
+    OpenLog,
     Quit,
 }
 
@@ -48,6 +52,7 @@ struct Tray {
     icon: TrayIcon,
     toggle_item: MenuItem,
     settings_item: MenuItem,
+    log_item: MenuItem,
     quit_item: MenuItem,
     vi_icon: Icon,
     en_icon: Icon,
@@ -71,11 +76,13 @@ impl Tray {
 
         let toggle_item = MenuItem::new(toggle_text(vietnamese), true, None);
         let settings_item = MenuItem::new("Cài đặt...", true, None);
+        let log_item = MenuItem::new("Xem nhật ký", true, None);
         let quit_item = MenuItem::new("Thoát", true, None);
         let menu = Menu::new();
         menu.append_items(&[
             &toggle_item,
             &settings_item,
+            &log_item,
             &PredefinedMenuItem::separator(),
             &quit_item,
         ])
@@ -89,7 +96,7 @@ impl Tray {
             .with_icon(current)
             .build()
             .map_err(|e| e.to_string())?;
-        Ok(Self { icon, toggle_item, settings_item, quit_item, vi_icon, en_icon })
+        Ok(Self { icon, toggle_item, settings_item, log_item, quit_item, vi_icon, en_icon })
     }
 
     fn show(&self, vietnamese: bool) {
@@ -107,6 +114,8 @@ impl Tray {
                 actions.push(UiAction::Toggle);
             } else if event.id == *self.settings_item.id() {
                 actions.push(UiAction::OpenSettings);
+            } else if event.id == *self.log_item.id() {
+                actions.push(UiAction::OpenLog);
             } else if event.id == *self.quit_item.id() {
                 actions.push(UiAction::Quit);
             }
@@ -128,16 +137,49 @@ impl Tray {
     }
 }
 
+/// Phần Windows của [`Platform`].
+struct WinPlatform<'a> {
+    settings: &'a mut Option<Child>,
+    beep: bool,
+}
+
+impl Platform for WinPlatform<'_> {
+    fn mods(&mut self, vk: u32, is_down: bool) -> Mods {
+        read_mods(vk, is_down)
+    }
+
+    fn caps_lock(&mut self) -> bool {
+        caps_lock_on()
+    }
+
+    fn replace(&mut self, backspaces: usize, text: &str, opts: SendOptions) {
+        send::replace(backspaces, text, opts);
+    }
+
+    fn tap_key(&mut self, vk: u32) {
+        send::tap_key(vk);
+    }
+
+    fn open_settings(&mut self) {
+        process::open_settings(self.settings);
+    }
+
+    fn toggled(&mut self, vietnamese: bool) {
+        notify_toggle(vietnamese, self.beep, "phím tắt");
+    }
+}
+
+fn notify_toggle(vietnamese: bool, beep: bool, source: &str) {
+    log::info(&format!("Chuyển sang {} (nguồn: {source})", if vietnamese { "V" } else { "E" }));
+    if beep {
+        let style = if vietnamese { MB_ICONASTERISK } else { MB_ICONEXCLAMATION };
+        let _ = unsafe { MessageBeep(style) };
+    }
+}
+
 struct Runtime {
-    config: Config,
+    controller: Controller,
     config_mtime: Option<SystemTime>,
-    engine: Engine,
-    detector: HotkeyDetector,
-    /// `true`: đang gõ tiếng Việt (V); `false`: tiếng Anh (E).
-    vietnamese: bool,
-    foreground_exe: String,
-    /// Ứng dụng đang focus nằm trong danh sách loại trừ.
-    excluded: bool,
     tray: Option<Tray>,
     settings: Option<Child>,
     ticks: u32,
@@ -146,18 +188,9 @@ struct Runtime {
 
 impl Runtime {
     fn new(config: Config) -> Self {
-        let vietnamese = config.start_vietnamese;
-        let config_mtime = Config::modified();
-        let mut engine = Engine::new(config.engine_config());
-        engine.set_abbreviations(config.abbreviation_map());
         Self {
-            config,
-            config_mtime,
-            engine,
-            detector: HotkeyDetector::default(),
-            vietnamese,
-            foreground_exe: String::new(),
-            excluded: false,
+            config_mtime: Config::modified(),
+            controller: Controller::new(config),
             tray: None,
             settings: None,
             ticks: 0,
@@ -165,86 +198,37 @@ impl Runtime {
         }
     }
 
-    fn apply_config(&mut self, config: Config) {
-        self.engine.set_config(config.engine_config());
-        self.engine.set_abbreviations(config.abbreviation_map());
-        self.excluded = config.is_excluded(&self.foreground_exe);
-        self.detector = HotkeyDetector::default();
-        self.config = config;
-    }
-
-    fn toggle(&mut self) {
-        self.vietnamese = !self.vietnamese;
-        self.engine.cancel_context();
-    }
-
     fn on_foreground(&mut self, hwnd: HWND) {
-        self.engine.cancel_context();
-        self.foreground_exe = process::exe_of_window(hwnd).unwrap_or_default();
-        self.excluded = self.config.is_excluded(&self.foreground_exe);
-    }
-
-    fn send_options(&self) -> SendOptions {
-        SendOptions {
-            use_clipboard: self.config.use_clipboard,
-            select_with_shift: self.config.select_with_shift,
-        }
+        let exe = process::exe_of_window(hwnd).unwrap_or_default();
+        log::debug(&format!("Cửa sổ focus: {exe:?}"));
+        self.controller.set_foreground(&exe);
     }
 
     /// Trả về `true` nếu cần nuốt phím (ứng dụng không được thấy phím gốc).
     fn on_key(&mut self, vk: u32, is_down: bool) -> bool {
-        let mods = read_mods(vk, is_down);
-        match self.detector.feed(&self.config.hotkey, vk, is_down, mods) {
-            HotkeyEvent::None => {}
-            HotkeyEvent::Swallow => return true,
-            HotkeyEvent::Toggle { swallow } => {
-                self.toggle();
-                if swallow {
-                    return true;
-                }
-            }
+        let beep = self.controller.config().beep_on_toggle;
+        let mut platform = WinPlatform { settings: &mut self.settings, beep };
+        let swallow = self.controller.on_key(&mut platform, vk, is_down);
+        if log::debug_enabled() {
+            log::debug(&format!(
+                "vk={vk:#04x} {} -> {} | V={} loại_trừ={} exe={:?}",
+                if is_down { "xuống" } else { "lên" },
+                if swallow { "nuốt" } else { "cho qua" },
+                self.controller.vietnamese(),
+                self.controller.is_excluded(),
+                self.controller.foreground_exe(),
+            ));
         }
+        swallow
+    }
 
-        if !is_down || self.excluded {
-            return false;
-        }
-        // Ở chế độ tiếng Anh vẫn theo dõi chữ gõ nếu người dùng muốn gõ tắt hoạt động.
-        let track_english =
-            self.config.abbreviations_enabled && self.config.abbreviations_in_english;
-        if !self.vietnamese && !track_english {
-            return false;
-        }
-
-        let bracket =
-            self.vietnamese && self.config.bracket_horn && self.config.method == InputMethod::Telex;
-        let key = keys::classify(vk, mods.shift, caps_lock_on(), bracket);
-        if matches!(key, Key::Modifier) {
-            return false;
-        }
-        // Ctrl/Alt/Win + phím là phím tắt của ứng dụng: kết thúc từ, không can thiệp.
-        if mods.ctrl || mods.alt || mods.win {
-            self.engine.cancel_context();
-            return false;
-        }
-
-        let (reaction, resend) = match key {
-            Key::Modifier => return false,
-            Key::Backspace => (self.engine.backspace(), None),
-            Key::Char(c) if self.vietnamese => (self.engine.process(c), None),
-            Key::Char(c) => (self.engine.process_plain(c), None),
-            // Phím kết thúc từ bị nuốt khi mở rộng gõ tắt nên phải gửi lại sau phần thay thế.
-            Key::Boundary(b) => (self.engine.boundary(b), Some(vk)),
-        };
-        match reaction {
-            Reaction::Pass => false,
-            Reaction::Replace { backspaces, text } => {
-                send::replace(backspaces, &text, self.send_options());
-                if let Some(vk) = resend {
-                    send::tap_key(vk);
-                }
-                true
-            }
-        }
+    fn toggle_from_ui(&mut self, source: &str) {
+        self.controller.toggle();
+        notify_toggle(
+            self.controller.vietnamese(),
+            self.controller.config().beep_on_toggle,
+            source,
+        );
     }
 
     fn tick(&mut self) {
@@ -258,7 +242,8 @@ impl Runtime {
                 // Nếu chưa đọc được (đang ghi dở) thì thử lại ở chu kỳ sau.
                 if let Some(config) = Config::try_load() {
                     self.config_mtime = modified;
-                    self.apply_config(config);
+                    log::info("Đã nạp lại cấu hình");
+                    self.controller.apply_config(config);
                 }
             }
         }
@@ -266,17 +251,22 @@ impl Runtime {
         let actions = self.tray.as_ref().map(Tray::poll).unwrap_or_default();
         for action in actions {
             match action {
-                UiAction::Toggle => self.toggle(),
+                UiAction::Toggle => self.toggle_from_ui("khay"),
                 UiAction::OpenSettings => process::open_settings(&mut self.settings),
-                UiAction::Quit => unsafe { PostQuitMessage(0) },
+                UiAction::OpenLog => process::open_log(),
+                UiAction::Quit => {
+                    log::info("Thoát theo yêu cầu");
+                    unsafe { PostQuitMessage(0) }
+                }
             }
         }
 
-        if self.shown_icon != Some(self.vietnamese) {
+        let vietnamese = self.controller.vietnamese();
+        if self.shown_icon != Some(vietnamese) {
             if let Some(tray) = &self.tray {
-                tray.show(self.vietnamese);
+                tray.show(vietnamese);
             }
-            self.shown_icon = Some(self.vietnamese);
+            self.shown_icon = Some(vietnamese);
         }
     }
 }
@@ -319,13 +309,20 @@ unsafe extern "system" fn keyboard_proc(code: i32, wparam: WPARAM, lparam: LPARA
     if code == HC_ACTION as i32 {
         let kb = unsafe { &*(lparam.0 as *const KBDLLHOOKSTRUCT) };
         let injected = (kb.flags.0 & LLKHF_INJECTED.0) != 0 || kb.dwExtraInfo == send::MAGIC;
+        if !FIRST_KEY_LOGGED.swap(true, Ordering::Relaxed) {
+            log::info(&format!(
+                "Hook bàn phím đã nhận phím đầu tiên (vk={:#04x}, do chương trình gửi={injected})",
+                kb.vkCode
+            ));
+        }
         let msg = wparam.0 as u32;
         let is_down = matches!(msg, WM_KEYDOWN | WM_SYSKEYDOWN);
         let is_up = matches!(msg, WM_KEYUP | WM_SYSKEYUP);
         if !injected && (is_down || is_up) {
-            let swallow = with_runtime(|rt| rt.on_key(kb.vkCode, is_down)).unwrap_or(false);
-            if swallow {
-                return LRESULT(1);
+            match with_runtime(|rt| rt.on_key(kb.vkCode, is_down)) {
+                Some(true) => return LRESULT(1),
+                Some(false) => {}
+                None => log::debug("Bỏ qua phím vì trạng thái đang bận"),
             }
         }
     }
@@ -337,7 +334,7 @@ unsafe extern "system" fn mouse_proc(code: i32, wparam: WPARAM, lparam: LPARAM) 
     if code == HC_ACTION as i32 {
         let msg = wparam.0 as u32;
         if matches!(msg, WM_LBUTTONDOWN | WM_RBUTTONDOWN | WM_MBUTTONDOWN) {
-            let _ = with_runtime(|rt| rt.engine.cancel_context());
+            let _ = with_runtime(|rt| rt.controller.cancel_context());
         }
     }
     unsafe { CallNextHookEx(None, code, wparam, lparam) }
@@ -361,12 +358,29 @@ unsafe extern "system" fn timer_proc(_hwnd: HWND, _msg: u32, _id: usize, _time: 
 }
 
 /// Chạy bộ gõ cho đến khi người dùng chọn "Thoát" ở menu khay.
-pub fn run() -> Result<(), String> {
+/// `debug`: ghi nhật ký chi tiết từng phím vào `vnekey.log`.
+pub fn run(debug: bool) -> Result<(), String> {
+    log::init(Config::dir().map(|d| d.join("vnekey.log")), debug);
+    log::info(&format!(
+        "vnekey {} khởi động (gỡ lỗi={debug}, exe={:?}, cấu hình={:?})",
+        env!("CARGO_PKG_VERSION"),
+        std::env::current_exe().ok(),
+        Config::path(),
+    ));
+
     let first_run = !Config::exists();
-    let mut runtime = Runtime::new(Config::load());
-    runtime.tray = Some(Tray::new(runtime.vietnamese)?);
-    runtime.shown_icon = Some(runtime.vietnamese);
-    if first_run {
+    let config = Config::load();
+    let open_settings_at_start = first_run || config.show_settings_on_start;
+    let mut runtime = Runtime::new(config);
+    let vietnamese = runtime.controller.vietnamese();
+    runtime.tray =
+        Some(Tray::new(vietnamese).inspect_err(|e| log::info(&format!("Lỗi tạo khay: {e}")))?);
+    runtime.shown_icon = Some(vietnamese);
+    log::info(&format!(
+        "Đã tạo biểu tượng khay, chế độ ban đầu: {}",
+        if vietnamese { "V" } else { "E" }
+    ));
+    if open_settings_at_start {
         process::open_settings(&mut runtime.settings);
     }
     runtime.on_foreground(unsafe { GetForegroundWindow() });
@@ -374,9 +388,15 @@ pub fn run() -> Result<(), String> {
 
     let hmod: HINSTANCE = unsafe { GetModuleHandleW(None) }.map_err(|e| e.to_string())?.into();
     let keyboard = unsafe { SetWindowsHookExW(WH_KEYBOARD_LL, Some(keyboard_proc), hmod, 0) }
-        .map_err(|e| format!("Không cài được hook bàn phím: {e}"))?;
+        .map_err(|e| {
+            let msg = format!("Không cài được hook bàn phím: {e}");
+            log::info(&msg);
+            msg
+        })?;
+    log::info("Đã cài hook bàn phím");
     // Hook chuột và theo dõi cửa sổ chỉ để reset từ; lỗi thì bỏ qua.
     let mouse = unsafe { SetWindowsHookExW(WH_MOUSE_LL, Some(mouse_proc), hmod, 0) }.ok();
+    log::info(&format!("Hook chuột: {}", if mouse.is_some() { "ok" } else { "lỗi" }));
     let win_event = unsafe {
         SetWinEventHook(
             EVENT_SYSTEM_FOREGROUND,
@@ -388,7 +408,12 @@ pub fn run() -> Result<(), String> {
             WINEVENT_OUTOFCONTEXT | WINEVENT_SKIPOWNPROCESS,
         )
     };
+    log::info(&format!(
+        "Theo dõi cửa sổ focus: {}",
+        if win_event.is_invalid() { "lỗi" } else { "ok" }
+    ));
     let timer = unsafe { SetTimer(None, 0, TICK_MS, Some(timer_proc)) };
+    log::info(&format!("Bộ đếm giờ: {}", if timer == 0 { "lỗi" } else { "ok" }));
 
     let mut msg = MSG::default();
     unsafe {
@@ -407,6 +432,7 @@ pub fn run() -> Result<(), String> {
         }
         let _ = UnhookWindowsHookEx(keyboard);
     }
+    log::info("Đã dừng");
     // Giải phóng trạng thái (gỡ biểu tượng khay).
     RT.with(|cell| cell.borrow_mut().take());
     Ok(())

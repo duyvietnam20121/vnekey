@@ -181,6 +181,20 @@ impl Engine {
         reaction
     }
 
+    /// Đưa từ đang gõ về đúng các phím đã bấm (ví dụ "việt" về "vieetj") và ngừng biến đổi
+    /// cho đến hết từ. Trả về `Pass` nếu không có gì để khôi phục.
+    pub fn restore_word(&mut self) -> Reaction {
+        if self.shown.is_empty() || self.raw == self.shown {
+            return Reaction::Pass;
+        }
+        let charset = self.config.charset;
+        let backspaces = self.shown.chars().map(|c| charset.encoded_len(c)).sum();
+        let text = charset.encode(&self.raw);
+        self.mode = Mode::Restored;
+        self.shown = self.raw.clone();
+        Reaction::Replace { backspaces, text }
+    }
+
     /// Theo dõi chữ gõ khi đang ở chế độ tiếng Anh, chỉ để gõ tắt vẫn hoạt động.
     pub fn process_plain(&mut self, ch: char) -> Reaction {
         if !ch.is_ascii_alphanumeric() {
@@ -1101,5 +1115,37 @@ mod tests {
         assert_eq!(telex("ngiuj"), "ngịu");
         assert_eq!(vni("luw"), "luw");
         assert_eq!(vni("lu7u"), "lưu");
+    }
+
+    #[test]
+    fn restore_word_returns_to_typed_keys() {
+        let mut e = Engine::new(EngineConfig::default());
+        let mut screen = String::new();
+        for ch in "vieetj".chars() {
+            match e.process(ch) {
+                Reaction::Pass => screen.push(ch),
+                Reaction::Replace { backspaces, text } => {
+                    for _ in 0..backspaces {
+                        screen.pop();
+                    }
+                    screen.push_str(&text);
+                }
+            }
+        }
+        assert_eq!(screen, "việt");
+        match e.restore_word() {
+            Reaction::Replace { backspaces, text } => {
+                for _ in 0..backspaces {
+                    screen.pop();
+                }
+                screen.push_str(&text);
+            }
+            Reaction::Pass => panic!("phải có gì đó để khôi phục"),
+        }
+        assert_eq!(screen, "vieetj");
+        // Không có gì để khôi phục thêm, và chữ gõ tiếp theo không bị biến đổi nữa.
+        assert_eq!(e.restore_word(), Reaction::Pass);
+        assert_eq!(e.process('s'), Reaction::Pass);
+        assert_eq!(Engine::new(EngineConfig::default()).restore_word(), Reaction::Pass);
     }
 }

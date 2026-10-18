@@ -37,6 +37,24 @@ impl Hotkey {
     pub fn has_modifier(&self) -> bool {
         self.ctrl || self.shift || self.alt || self.win
     }
+
+    /// Các phím bổ trợ của tổ hợp (bỏ qua phím chính).
+    pub fn mods(&self) -> Mods {
+        Mods { ctrl: self.ctrl, shift: self.shift, alt: self.alt, win: self.win }
+    }
+
+    /// Ctrl + Space, mặc định của phím phục hồi từ.
+    pub fn ctrl_space() -> Self {
+        Self { ctrl: true, shift: false, alt: false, win: false, key: Some(' ') }
+    }
+}
+
+/// Màu giao diện của cửa sổ cài đặt.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+pub enum Theme {
+    #[default]
+    Dark,
+    Light,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -63,10 +81,24 @@ pub struct Config {
     pub start_vietnamese: bool,
     pub autostart: bool,
     pub run_as_admin: bool,
+    /// Mở cửa sổ cài đặt mỗi lần khởi động (lần chạy đầu tiên luôn mở).
+    pub show_settings_on_start: bool,
+    /// Phát tiếng bíp khi chuyển Việt/Anh.
+    pub beep_on_toggle: bool,
+    /// Nhớ chế độ Việt/Anh riêng cho từng ứng dụng.
+    pub per_app_state: bool,
+    /// Bật phím phục hồi từ (đưa từ đang gõ về đúng các phím đã bấm).
+    pub restore_enabled: bool,
+    /// Bật phím tắt chức năng F1, F2, F3, F5, F9, F12 (cùng các phím bổ trợ `function_mods`).
+    pub function_keys_enabled: bool,
+    pub theme: Theme,
     /// Tên file .exe (không phân biệt hoa thường) mà vnekey không can thiệp.
     pub excluded_apps: Vec<String>,
     // TOML yêu cầu các bảng (table) nằm sau các giá trị đơn.
     pub hotkey: Hotkey,
+    pub restore_hotkey: Hotkey,
+    /// Chỉ dùng các phím bổ trợ; phím chính là F1-F12.
+    pub function_mods: Hotkey,
     /// Bảng gõ tắt: từ gõ -> cụm mở rộng.
     pub abbreviations: BTreeMap<String, String>,
 }
@@ -88,8 +120,16 @@ impl Default for Config {
             start_vietnamese: true,
             autostart: false,
             run_as_admin: false,
+            show_settings_on_start: false,
+            beep_on_toggle: false,
+            per_app_state: false,
+            restore_enabled: false,
+            function_keys_enabled: false,
+            theme: Theme::Dark,
             excluded_apps: Vec::new(),
             hotkey: Hotkey::default(),
+            restore_hotkey: Hotkey::ctrl_space(),
+            function_mods: Hotkey::default(),
             abbreviations: BTreeMap::new(),
         }
     }
@@ -214,13 +254,11 @@ mod tests {
 
     #[test]
     fn default_config_round_trips_through_toml() {
-        let mut cfg = Config {
-            charset: Charset::Tcvn3,
-            excluded_apps: vec!["game.exe".into()],
-            hotkey: Hotkey { key: Some('Z'), ..Hotkey::default() },
-            ..Config::default()
-        };
+        let mut cfg = Config::default();
+        cfg.charset = Charset::Tcvn3;
+        cfg.excluded_apps = vec!["game.exe".into()];
         cfg.abbreviations.insert("ko".into(), "không".into());
+        cfg.hotkey.key = Some('Z');
         let text = toml::to_string_pretty(&cfg).unwrap();
         let back: Config = toml::from_str(&text).unwrap();
         assert_eq!(cfg, back);

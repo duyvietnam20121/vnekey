@@ -72,6 +72,13 @@ fn focus_settings() {
     }
 }
 
+/// Mở file nhật ký `vnekey.log` bằng Notepad.
+pub fn open_log() {
+    if let Some(dir) = Config::dir() {
+        let _ = Command::new("notepad").arg(dir.join("vnekey.log")).spawn();
+    }
+}
+
 /// Chạy lại vnekey với quyền admin (hiện hộp thoại UAC). `true` nếu bản nâng quyền đã được mở.
 pub fn relaunch_elevated() -> bool {
     let Ok(exe) = std::env::current_exe() else {

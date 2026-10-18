@@ -4,7 +4,8 @@
 //! - mặc định: tiến trình khay, giữ hook bàn phím và biểu tượng khay hệ thống;
 //! - `--settings`: cửa sổ cài đặt, ghi `config.toml`, tiến trình khay tự nạp lại.
 //!
-//! Cờ `--elevated` đánh dấu bản đã được chạy lại với quyền admin.
+//! Cờ `--elevated` đánh dấu bản đã được chạy lại với quyền admin. Cờ `--debug` (hoặc biến môi
+//! trường `VNEKEY_DEBUG`) ghi nhật ký từng phím vào `%APPDATA%\vnekey\vnekey.log`.
 
 #![cfg_attr(all(windows, not(debug_assertions)), windows_subsystem = "windows")]
 
@@ -32,7 +33,8 @@ fn main() {
         let _ = process::spawn_settings();
         return;
     };
-    if let Err(e) = vnekey_win::runtime::run() {
+    let debug = args.iter().any(|a| a == "--debug") || std::env::var_os("VNEKEY_DEBUG").is_some();
+    if let Err(e) = vnekey_win::runtime::run(debug) {
         process::report_error(&e);
     }
 }

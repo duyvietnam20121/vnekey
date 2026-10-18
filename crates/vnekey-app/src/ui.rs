@@ -143,7 +143,10 @@ impl App {
             ui.checkbox(&mut d.spell_check, "Kiểm tra chính tả (tự khôi phục phím với từ sai)");
             ui.checkbox(&mut d.modern_tone, "Đặt dấu kiểu mới (hoà, thuý thay vì hòa, thúy)");
             ui.checkbox(&mut d.allow_fjwz, "Cho phép 'f j w z' làm phụ âm");
-            ui.checkbox(&mut d.auto_capitalize, "Tự động viết hoa chữ đầu câu (sau . ! ? và Enter)");
+            ui.checkbox(
+                &mut d.auto_capitalize,
+                "Tự động viết hoa chữ đầu câu (sau . ! ? và Enter)",
+            );
             ui.checkbox(&mut d.bracket_horn, "Telex: dùng [ ] cho ơ ư");
         });
 
@@ -329,7 +332,8 @@ impl App {
         let startup_changed = self.draft.autostart != self.saved.autostart
             || self.draft.run_as_admin != self.saved.run_as_admin;
         if startup_changed {
-            if let Err(e) = vnekey_win::autostart::set(self.draft.autostart, self.draft.run_as_admin)
+            if let Err(e) =
+                vnekey_win::autostart::set(self.draft.autostart, self.draft.run_as_admin)
             {
                 problems.push(e);
                 self.draft.autostart = self.saved.autostart; // phản ánh trạng thái thực tế
@@ -365,11 +369,13 @@ impl eframe::App for App {
         egui::CentralPanel::default().show(ctx, |ui| {
             self.controls(ui);
             self.tab_bar(ui);
-            egui::ScrollArea::vertical().auto_shrink([false, false]).show(ui, |ui| match self.tab {
-                Tab::Basic => self.tab_basic(ui),
-                Tab::Abbreviations => self.tab_abbreviations(ui),
-                Tab::Hotkeys => self.tab_hotkeys(ui),
-                Tab::System => self.tab_system(ui),
+            egui::ScrollArea::vertical().auto_shrink([false, false]).show(ui, |ui| {
+                match self.tab {
+                    Tab::Basic => self.tab_basic(ui),
+                    Tab::Abbreviations => self.tab_abbreviations(ui),
+                    Tab::Hotkeys => self.tab_hotkeys(ui),
+                    Tab::System => self.tab_system(ui),
+                }
             });
         });
     }
